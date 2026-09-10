@@ -1,0 +1,643 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Live Inspector</title>
+<style>
+  :root{
+    --bg:#1b1d21; --bg-2:#232529; --bg-3:#2a2d32; --line:#34373d;
+    --text:#e7e9ec; --text-dim:#9aa0a8; --accent:#5b9dff; --accent-dim:#3a6bb0;
+    --green:#5fc98d; --amber:#e0b34d; --red:#e2685f;
+    --mono:'SF Mono',Consolas,'Roboto Mono',monospace;
+    --sans:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+  }
+  *{box-sizing:border-box;}
+  html,body{height:100%;margin:0;background:var(--bg);color:var(--text);font-family:var(--sans);font-size:13px;overflow:hidden;}
+  button{font-family:var(--sans);cursor:pointer;}
+  input,textarea{font-family:var(--mono);}
+
+  #topbar{
+    height:46px;display:flex;align-items:center;gap:10px;padding:0 12px;
+    background:var(--bg-2);border-bottom:1px solid var(--line);flex-shrink:0;
+  }
+  #topbar .brand{font-weight:600;letter-spacing:.2px;color:var(--text);display:flex;align-items:center;gap:6px;}
+  #topbar .brand svg{opacity:.85;}
+  .btn{
+    background:var(--bg-3);border:1px solid var(--line);color:var(--text);
+    padding:6px 11px;border-radius:6px;font-size:12.5px;display:flex;align-items:center;gap:6px;
+  }
+  .btn:hover{background:#33363c;}
+  .btn:active{transform:translateY(1px);}
+  .btn.primary{background:var(--accent-dim);border-color:var(--accent-dim);}
+  .btn.primary:hover{background:var(--accent);}
+  .btn.toggled{background:var(--accent-dim);border-color:var(--accent);}
+  .btn:disabled{opacity:.4;cursor:not-allowed;}
+  #filename{color:var(--text-dim);font-size:12.5px;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  #spacer{flex:1;}
+  #status{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-dim);}
+  #status .dot{width:7px;height:7px;border-radius:50%;background:var(--text-dim);flex-shrink:0;}
+  #status.saved .dot{background:var(--green);}
+  #status.pending .dot{background:var(--amber);}
+  #status.saving .dot{background:var(--accent);animation:pulse 1s infinite;}
+  #status.error .dot{background:var(--red);}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+
+  #main{flex:1;display:flex;min-height:0;}
+  #canvasWrap{flex:1;position:relative;background:#111214;min-width:0;}
+  #canvasWrap iframe{width:100%;height:100%;border:0;background:#fff;}
+  #dropzone{
+    position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;
+    gap:14px;color:var(--text-dim);text-align:center;padding:30px;
+  }
+  #dropzone .icon{opacity:.5;}
+  #dropzone h1{font-size:16px;font-weight:600;color:var(--text);margin:0;}
+  #dropzone p{margin:0;font-size:12.5px;line-height:1.6;max-width:340px;}
+  #dropzone .warn{color:var(--amber);font-size:11.5px;max-width:360px;}
+
+  #panel{
+    width:340px;flex-shrink:0;background:var(--bg-2);border-left:1px solid var(--line);
+    display:flex;flex-direction:column;min-height:0;
+  }
+  #breadcrumbBar{
+    padding:8px 10px;border-bottom:1px solid var(--line);display:flex;gap:4px;flex-wrap:wrap;
+    max-height:74px;overflow-y:auto;flex-shrink:0;
+  }
+  .crumb{
+    font-family:var(--mono);font-size:11px;background:var(--bg-3);border:1px solid var(--line);
+    padding:2px 6px;border-radius:4px;color:var(--text-dim);
+  }
+  .crumb:hover{color:var(--text);border-color:var(--accent-dim);}
+  .crumb.current{color:var(--accent);border-color:var(--accent-dim);}
+  .crumb-sep{color:var(--text-dim);font-size:11px;padding:2px 0;}
+
+  #elActions{display:flex;gap:6px;padding:8px 10px;border-bottom:1px solid var(--line);flex-shrink:0;}
+  #elActions .btn{flex:1;justify-content:center;padding:5px;font-size:11.5px;}
+
+  #tabs{display:flex;border-bottom:1px solid var(--line);flex-shrink:0;}
+  .tab{flex:1;text-align:center;padding:9px 0;font-size:12px;color:var(--text-dim);background:none;border:none;border-bottom:2px solid transparent;}
+  .tab.active{color:var(--text);border-bottom-color:var(--accent);}
+  .tab:hover{color:var(--text);}
+
+  #panelBody{flex:1;overflow-y:auto;padding:10px;}
+  .empty-hint{color:var(--text-dim);font-size:12px;padding:20px 6px;text-align:center;line-height:1.6;}
+
+  .section-title{font-size:10.5px;text-transform:uppercase;letter-spacing:.5px;color:var(--text-dim);margin:12px 0 6px;}
+  .section-title:first-child{margin-top:0;}
+
+  .row{display:flex;gap:5px;margin-bottom:5px;align-items:center;}
+  .row input[type=text]{
+    background:var(--bg-3);border:1px solid var(--line);color:var(--text);border-radius:4px;
+    padding:5px 6px;font-size:12px;min-width:0;
+  }
+  .row input[type=text]:focus{outline:none;border-color:var(--accent-dim);}
+  .row .key{flex:0 0 40%;color:var(--accent);}
+  .row .val{flex:1;}
+  .row .rm{
+    flex-shrink:0;width:20px;height:20px;border-radius:4px;border:1px solid var(--line);
+    background:var(--bg-3);color:var(--text-dim);font-size:13px;line-height:1;display:flex;align-items:center;justify-content:center;
+  }
+  .row .rm:hover{color:var(--red);border-color:var(--red);}
+  .addRowBtn{width:100%;padding:5px;font-size:11.5px;color:var(--text-dim);background:var(--bg-3);border:1px dashed var(--line);border-radius:4px;margin-top:2px;}
+  .addRowBtn:hover{color:var(--text);border-color:var(--accent-dim);}
+
+  .computedGrid{display:grid;grid-template-columns:1fr 1.3fr;gap:4px 8px;font-size:11.5px;}
+  .computedGrid div.k{color:var(--text-dim);}
+  .computedGrid div.v{font-family:var(--mono);color:var(--text);word-break:break-all;}
+
+  textarea.text-edit, textarea.html-edit{
+    width:100%;background:var(--bg-3);border:1px solid var(--line);color:var(--text);
+    border-radius:4px;padding:8px;font-size:12px;resize:vertical;min-height:80px;line-height:1.5;
+  }
+  textarea.html-edit{min-height:220px;}
+  textarea.text-edit:focus, textarea.html-edit:focus{outline:none;border-color:var(--accent-dim);}
+  .applyRow{display:flex;justify-content:flex-end;margin-top:6px;}
+  .applyRow .btn{padding:5px 12px;font-size:11.5px;}
+
+  #footer{padding:6px 10px;border-top:1px solid var(--line);font-size:10.5px;color:var(--text-dim);display:flex;gap:10px;flex-shrink:0;}
+  #footer kbd{background:var(--bg-3);border:1px solid var(--line);border-radius:3px;padding:0 4px;font-family:var(--mono);}
+
+  ::-webkit-scrollbar{width:9px;height:9px;}
+  ::-webkit-scrollbar-thumb{background:#3c3f45;border-radius:5px;}
+  ::-webkit-scrollbar-track{background:transparent;}
+</style>
+</head>
+<body style="height:100%;display:flex;flex-direction:column;">
+
+  <div id="topbar">
+    <div class="brand">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2"><path d="M9 3 5 7l4 4M15 3l4 4-4 4M13 3l-2 18"/></svg>
+      Live Inspector
+    </div>
+    <button class="btn primary" id="openBtn">Open HTML file</button>
+    <button class="btn" id="reloadBtn" disabled title="Reload from disk (discards unsaved-but-not-yet-written edits)">Reload</button>
+    <span id="filename">No file open</span>
+    <div id="spacer"></div>
+    <button class="btn toggled" id="inspectBtn" title="Toggle element picker">◎ Inspect</button>
+    <button class="btn" id="saveBtn" disabled>Save now</button>
+    <div id="status" class="idle"><span class="dot"></span><span id="statusText">No file open</span></div>
+  </div>
+
+  <div id="main">
+    <div id="canvasWrap">
+      <div id="dropzone">
+        <svg class="icon" width="46" height="46" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>
+        <h1>Open a local HTML file to start</h1>
+        <p>Click an element to select it, edit its styles, attributes or text in the panel on the right, and it saves back to the same file on disk automatically as you edit.</p>
+        <p class="warn" id="apiWarn" style="display:none">Your browser doesn't support direct file writing (that needs a Chromium browser — Chrome, Edge, Arc, Brave). You can still open, edit and preview a file here, but you'll need to use "Download edited file" to export changes instead of auto‑save.</p>
+      </div>
+      <iframe id="frame" style="display:none"></iframe>
+    </div>
+
+    <div id="panel">
+      <div id="breadcrumbBar"><span class="empty-hint" style="padding:2px 0">No selection</span></div>
+      <div id="elActions" style="display:none">
+        <button class="btn" id="dupBtn">Duplicate</button>
+        <button class="btn" id="delBtn">Delete</button>
+      </div>
+      <div id="tabs" style="display:none">
+        <button class="tab active" data-tab="styles">Styles</button>
+        <button class="tab" data-tab="attrs">Attributes</button>
+        <button class="tab" data-tab="html">HTML</button>
+      </div>
+      <div id="panelBody">
+        <div class="empty-hint">Click an element in the page to inspect and edit it.</div>
+      </div>
+      <div id="footer">
+        <span><kbd>Click</kbd> select</span>
+        <span><kbd>Dbl-click</kbd> edit text</span>
+        <span><kbd>Esc</kbd> deselect</span>
+        <span><kbd>⌘/Ctrl+S</kbd> save</span>
+      </div>
+    </div>
+  </div>
+
+<script>
+(function(){
+  const supportsFS = 'showOpenFilePicker' in window;
+  const openBtn = document.getElementById('openBtn');
+  const reloadBtn = document.getElementById('reloadBtn');
+  const saveBtn = document.getElementById('saveBtn');
+  const inspectBtn = document.getElementById('inspectBtn');
+  const filenameEl = document.getElementById('filename');
+  const statusEl = document.getElementById('status');
+  const statusText = document.getElementById('statusText');
+  const dropzone = document.getElementById('dropzone');
+  const apiWarn = document.getElementById('apiWarn');
+  const frame = document.getElementById('frame');
+  const breadcrumbBar = document.getElementById('breadcrumbBar');
+  const elActions = document.getElementById('elActions');
+  const tabsEl = document.getElementById('tabs');
+  const panelBody = document.getElementById('panelBody');
+
+  if(!supportsFS){ apiWarn.style.display='block'; }
+
+  let fileHandle = null;
+  let originalDoctype = '<!DOCTYPE html>';
+  let iframeDoc = null, iframeWin = null;
+  let selected = null;
+  let inspectMode = true;
+  let activeTab = 'styles';
+  let saveTimer = null;
+  let editingInPlace = false;
+  let dirty = false;
+
+  // ---------- status ----------
+  function setStatus(kind, text){
+    statusEl.className = kind;
+    statusText.textContent = text;
+  }
+
+  // ---------- open file ----------
+  openBtn.addEventListener('click', async () => {
+    try{
+      if(supportsFS){
+        const [handle] = await window.showOpenFilePicker({
+          types:[{description:'HTML files', accept:{'text/html':['.html','.htm']}}]
+        });
+        await handle.requestPermission({mode:'readwrite'});
+        fileHandle = handle;
+        const file = await handle.getFile();
+        const text = await file.text();
+        loadDocument(text, file.name);
+      } else {
+        const input = document.createElement('input');
+        input.type = 'file'; input.accept = '.html,.htm';
+        input.onchange = async () => {
+          const file = input.files[0];
+          if(!file) return;
+          fileHandle = null;
+          const text = await file.text();
+          loadDocument(text, file.name);
+        };
+        input.click();
+      }
+    }catch(e){
+      if(e.name !== 'AbortError') setStatus('error', 'Could not open file: ' + e.message);
+    }
+  });
+
+  reloadBtn.addEventListener('click', async () => {
+    if(!fileHandle) return;
+    try{
+      const file = await fileHandle.getFile();
+      const text = await file.text();
+      loadDocument(text, file.name);
+    }catch(e){ setStatus('error', 'Reload failed: ' + e.message); }
+  });
+
+  function loadDocument(text, name){
+    const m = text.match(/^\s*<!DOCTYPE[^>]*>/i);
+    originalDoctype = m ? m[0] : '<!DOCTYPE html>';
+    filenameEl.textContent = name;
+    filenameEl.title = name;
+    dropzone.style.display = 'none';
+    frame.style.display = 'block';
+    selected = null;
+    renderPanel();
+    frame.onload = () => {
+      iframeDoc = frame.contentDocument;
+      iframeWin = frame.contentWindow;
+      injectOverlayElements();
+      wireIframeEvents();
+      observeMutations();
+      reloadBtn.disabled = !fileHandle;
+      saveBtn.disabled = false;
+      setStatus(fileHandle ? 'saved' : 'idle', fileHandle ? 'Saved' : 'Loaded (no auto-save — use Download)');
+    };
+    frame.srcdoc = text;
+  }
+
+  // ---------- overlay (hover/select highlight) injected into the iframe doc ----------
+  function injectOverlayElements(){
+    const style = iframeDoc.createElement('style');
+    style.id = '__inspector_style__';
+    style.textContent = `
+      #__inspector_hover__, #__inspector_select__ {
+        position:fixed; pointer-events:none; z-index:2147483000; box-sizing:border-box;
+        display:none; border-radius:2px;
+      }
+      #__inspector_hover__{ background:rgba(91,157,255,.12); outline:1px dashed rgba(91,157,255,.9); }
+      #__inspector_select__{ background:rgba(91,157,255,.08); outline:2px solid #5b9dff; }
+      #__inspector_label__{
+        position:fixed; pointer-events:none; z-index:2147483001; display:none;
+        background:#1b1d21; color:#e7e9ec; font:11px -apple-system,sans-serif; padding:2px 6px;
+        border-radius:3px; white-space:nowrap;
+      }
+    `;
+    iframeDoc.head.appendChild(style);
+    const hover = iframeDoc.createElement('div'); hover.id='__inspector_hover__';
+    const select = iframeDoc.createElement('div'); select.id='__inspector_select__';
+    const label = iframeDoc.createElement('div'); label.id='__inspector_label__';
+    iframeDoc.body.appendChild(hover);
+    iframeDoc.body.appendChild(select);
+    iframeDoc.body.appendChild(label);
+  }
+  function isInspectorNode(n){ return n && n.nodeType===1 && n.id && n.id.indexOf('__inspector_')===0; }
+
+  function positionOverlay(el, box, showLabel){
+    if(!el){ box.style.display='none'; if(showLabel) iframeDoc.getElementById('__inspector_label__').style.display='none'; return; }
+    const r = el.getBoundingClientRect();
+    box.style.display='block';
+    box.style.left = r.left+'px'; box.style.top = r.top+'px';
+    box.style.width = r.width+'px'; box.style.height = r.height+'px';
+    if(showLabel){
+      const label = iframeDoc.getElementById('__inspector_label__');
+      const idc = el.id? '#'+el.id : '';
+      const cls = el.className && typeof el.className==='string' ? '.'+el.className.trim().split(/\s+/).join('.') : '';
+      label.textContent = el.tagName.toLowerCase()+idc+cls+`  ${Math.round(r.width)}×${Math.round(r.height)}`;
+      label.style.display='block';
+      let top = r.top - 20;
+      if(top < 0) top = r.bottom + 2;
+      label.style.top = top+'px';
+      label.style.left = Math.max(0,r.left)+'px';
+    }
+  }
+
+  function wireIframeEvents(){
+    iframeDoc.addEventListener('mousemove', (e) => {
+      if(!inspectMode) return;
+      if(isInspectorNode(e.target)) return;
+      positionOverlay(e.target, iframeDoc.getElementById('__inspector_hover__'), true);
+    });
+    iframeDoc.addEventListener('mouseleave', () => {
+      iframeDoc.getElementById('__inspector_hover__').style.display='none';
+      iframeDoc.getElementById('__inspector_label__').style.display='none';
+    });
+    iframeDoc.addEventListener('click', (e) => {
+      const a = e.target.closest && e.target.closest('a[href]');
+      if(a) e.preventDefault();
+      const f = e.target.closest && e.target.closest('form');
+      if(f) e.preventDefault();
+      if(!inspectMode) return;
+      if(isInspectorNode(e.target)) return;
+      e.preventDefault(); e.stopPropagation();
+      selectElement(e.target);
+    }, true);
+    iframeDoc.addEventListener('submit', (e) => e.preventDefault(), true);
+    iframeDoc.addEventListener('dblclick', (e) => {
+      if(!inspectMode) return;
+      if(isInspectorNode(e.target)) return;
+      e.preventDefault(); e.stopPropagation();
+      startInlineTextEdit(e.target);
+    }, true);
+    iframeDoc.addEventListener('scroll', () => {
+      if(selected) positionOverlay(selected, iframeDoc.getElementById('__inspector_select__'), false);
+    }, true);
+    iframeWin.addEventListener('resize', () => {
+      if(selected) positionOverlay(selected, iframeDoc.getElementById('__inspector_select__'), false);
+    });
+    iframeDoc.addEventListener('keydown', (e) => {
+      if(e.key === 'Escape'){ selectElement(null); }
+    });
+  }
+
+  function startInlineTextEdit(el){
+    if(el.children.length > 0) return; // only edit leaf text nodes in-canvas
+    editingInPlace = true;
+    el.setAttribute('contenteditable', 'true');
+    el.focus();
+    document.getSelection && iframeWin.getSelection().selectAllChildren(el);
+    function finish(){
+      el.removeAttribute('contenteditable');
+      el.removeEventListener('blur', finish);
+      editingInPlace = false;
+      scheduleSave();
+      if(selected === el) renderPanel();
+    }
+    el.addEventListener('blur', finish);
+  }
+
+  function selectElement(el){
+    selected = el;
+    positionOverlay(el, iframeDoc.getElementById('__inspector_select__'), false);
+    renderPanel();
+  }
+
+  inspectBtn.addEventListener('click', () => {
+    inspectMode = !inspectMode;
+    inspectBtn.classList.toggle('toggled', inspectMode);
+    if(!inspectMode && iframeDoc){
+      iframeDoc.getElementById('__inspector_hover__').style.display='none';
+      iframeDoc.getElementById('__inspector_label__').style.display='none';
+    }
+  });
+
+  // ---------- panel rendering ----------
+  function renderPanel(){
+    if(!selected){
+      breadcrumbBar.innerHTML = '<span class="empty-hint" style="padding:2px 0">No selection</span>';
+      elActions.style.display = 'none';
+      tabsEl.style.display = 'none';
+      panelBody.innerHTML = '<div class="empty-hint">Click an element in the page to inspect and edit it.</div>';
+      return;
+    }
+    elActions.style.display = 'flex';
+    tabsEl.style.display = 'flex';
+    renderBreadcrumb();
+    renderTabBody();
+  }
+
+  function renderBreadcrumb(){
+    const chain = [];
+    let n = selected;
+    while(n && n.nodeType===1){ chain.unshift(n); n = n.parentElement; }
+    breadcrumbBar.innerHTML = '';
+    chain.forEach((el, i) => {
+      const b = document.createElement('span');
+      b.className = 'crumb' + (el===selected ? ' current':'');
+      b.textContent = el.tagName.toLowerCase() + (el.id?('#'+el.id):'');
+      b.style.cursor='pointer';
+      b.addEventListener('click', () => selectElement(el));
+      breadcrumbBar.appendChild(b);
+      if(i < chain.length-1){
+        const sep = document.createElement('span'); sep.className='crumb-sep'; sep.textContent='›';
+        breadcrumbBar.appendChild(sep);
+      }
+    });
+  }
+
+  document.querySelectorAll('.tab').forEach(t => {
+    t.addEventListener('click', () => {
+      activeTab = t.dataset.tab;
+      document.querySelectorAll('.tab').forEach(x=>x.classList.toggle('active', x===t));
+      renderTabBody();
+    });
+  });
+
+  document.getElementById('dupBtn').addEventListener('click', () => {
+    if(!selected || !selected.parentElement) return;
+    const clone = selected.cloneNode(true);
+    selected.parentElement.insertBefore(clone, selected.nextSibling);
+    selectElement(clone);
+  });
+  document.getElementById('delBtn').addEventListener('click', () => {
+    if(!selected || !selected.parentElement) return;
+    const parent = selected.parentElement;
+    selected.remove();
+    selectElement(null);
+  });
+
+  function renderTabBody(){
+    panelBody.innerHTML = '';
+    if(activeTab === 'styles') renderStylesTab();
+    else if(activeTab === 'attrs') renderAttrsTab();
+    else renderHtmlTab();
+  }
+
+  function makeRow(keyVal, valVal, onKey, onVal, onRemove, keyPlaceholder, valPlaceholder){
+    const row = document.createElement('div'); row.className='row';
+    const k = document.createElement('input'); k.type='text'; k.className='key'; k.value=keyVal; k.placeholder=keyPlaceholder||'key';
+    const v = document.createElement('input'); v.type='text'; v.className='val'; v.value=valVal; v.placeholder=valPlaceholder||'value';
+    const rm = document.createElement('button'); rm.className='rm'; rm.textContent='×';
+    k.addEventListener('change', () => onKey(k.value, v.value));
+    v.addEventListener('input', () => onVal(k.value, v.value));
+    rm.addEventListener('click', () => onRemove());
+    row.appendChild(k); row.appendChild(v); row.appendChild(rm);
+    return row;
+  }
+
+  function renderStylesTab(){
+    const title = document.createElement('div'); title.className='section-title'; title.textContent='Inline styles';
+    panelBody.appendChild(title);
+    const style = selected.style;
+    for(let i=0;i<style.length;i++){
+      const prop = style.item(i);
+      const val = style.getPropertyValue(prop);
+      panelBody.appendChild(makeRow(prop, val,
+        (newKey, curVal) => { style.removeProperty(prop); if(newKey) style.setProperty(newKey, curVal); reposition(); scheduleSave(); renderStylesTab(); },
+        (curKey, newVal) => { style.setProperty(curKey, newVal); reposition(); scheduleSave(); },
+        () => { style.removeProperty(prop); scheduleSave(); renderStylesTab(); }
+      ));
+    }
+    const addBtn = document.createElement('button');
+    addBtn.className='addRowBtn'; addBtn.textContent='+ Add style property';
+    addBtn.addEventListener('click', () => {
+      selected.style.setProperty('--new-prop-placeholder', '');
+      renderStylesTab();
+      const rows = panelBody.querySelectorAll('.row .key');
+      const last = rows[rows.length-1];
+      if(last){ last.value=''; last.focus(); }
+    });
+    panelBody.appendChild(addBtn);
+
+    const compTitle = document.createElement('div'); compTitle.className='section-title'; compTitle.textContent='Computed (read-only)';
+    panelBody.appendChild(compTitle);
+    const grid = document.createElement('div'); grid.className='computedGrid';
+    const cs = iframeWin.getComputedStyle(selected);
+    ['display','position','color','background-color','font-size','font-family','margin','padding','width','height'].forEach(p => {
+      const k = document.createElement('div'); k.className='k'; k.textContent=p;
+      const v = document.createElement('div'); v.className='v'; v.textContent=cs.getPropertyValue(p);
+      grid.appendChild(k); grid.appendChild(v);
+    });
+    panelBody.appendChild(grid);
+  }
+
+  function renderAttrsTab(){
+    const idTitle = document.createElement('div'); idTitle.className='section-title'; idTitle.textContent='Identity';
+    panelBody.appendChild(idTitle);
+    panelBody.appendChild(makeRow('id', selected.id || '',
+      null,
+      (k,v) => { if(v) selected.id=v; else selected.removeAttribute('id'); reposition(); scheduleSave(); },
+      () => { selected.removeAttribute('id'); scheduleSave(); renderAttrsTab(); }, 'id','id'));
+    panelBody.appendChild(makeRow('class', selected.className || '',
+      null,
+      (k,v) => { selected.className = v; scheduleSave(); },
+      () => { selected.removeAttribute('class'); scheduleSave(); renderAttrsTab(); }, 'class','class list'));
+
+    const title = document.createElement('div'); title.className='section-title'; title.textContent='Other attributes';
+    panelBody.appendChild(title);
+    Array.from(selected.attributes).forEach(attr => {
+      if(['id','class','style'].includes(attr.name)) return;
+      panelBody.appendChild(makeRow(attr.name, attr.value,
+        (newKey, curVal) => { selected.removeAttribute(attr.name); if(newKey) selected.setAttribute(newKey, curVal); scheduleSave(); renderAttrsTab(); },
+        (curKey, newVal) => { selected.setAttribute(curKey, newVal); scheduleSave(); },
+        () => { selected.removeAttribute(attr.name); scheduleSave(); renderAttrsTab(); }
+      ));
+    });
+    const addBtn = document.createElement('button');
+    addBtn.className='addRowBtn'; addBtn.textContent='+ Add attribute';
+    addBtn.addEventListener('click', () => {
+      let n=1, name='data-new';
+      while(selected.hasAttribute(name)) name = 'data-new-'+(n++);
+      selected.setAttribute(name, '');
+      scheduleSave();
+      renderAttrsTab();
+    });
+    panelBody.appendChild(addBtn);
+
+    if(selected.children.length === 0){
+      const txtTitle = document.createElement('div'); txtTitle.className='section-title'; txtTitle.textContent='Text content';
+      panelBody.appendChild(txtTitle);
+      const ta = document.createElement('textarea'); ta.className='text-edit'; ta.value = selected.textContent;
+      ta.addEventListener('input', () => { selected.textContent = ta.value; reposition(); scheduleSave(); });
+      panelBody.appendChild(ta);
+    }
+  }
+
+  function renderHtmlTab(){
+    const title = document.createElement('div'); title.className='section-title'; title.textContent='Edit outerHTML';
+    panelBody.appendChild(title);
+    if(['HTML','HEAD','BODY'].includes(selected.tagName)){
+      const p = document.createElement('div'); p.className='empty-hint'; p.textContent='Editing raw HTML for <html>, <head> or <body> directly is disabled to avoid breaking the document — use the Styles/Attributes tabs instead.';
+      panelBody.appendChild(p);
+      return;
+    }
+    const ta = document.createElement('textarea'); ta.className='html-edit'; ta.value = selected.outerHTML;
+    panelBody.appendChild(ta);
+    const row = document.createElement('div'); row.className='applyRow';
+    const btn = document.createElement('button'); btn.className='btn primary'; btn.textContent='Apply';
+    btn.addEventListener('click', () => {
+      try{
+        const frag = iframeDoc.createRange().createContextualFragment(ta.value);
+        const newEl = frag.firstElementChild;
+        if(!newEl) throw new Error('No element found in markup');
+        selected.replaceWith(frag);
+        selectElement(newEl);
+        scheduleSave();
+      }catch(e){ alert('Could not apply HTML: ' + e.message); }
+    });
+    row.appendChild(btn);
+    panelBody.appendChild(row);
+  }
+
+  function reposition(){
+    if(selected) positionOverlay(selected, iframeDoc.getElementById('__inspector_select__'), false);
+  }
+
+  // ---------- mutation observation -> autosave ----------
+  function observeMutations(){
+    const obs = new MutationObserver((mutations) => {
+      if(editingInPlace) return;
+      let real = false;
+      for(const m of mutations){
+        if(isInspectorNode(m.target)) continue;
+        if(m.target.nodeType===3 && isInspectorNode(m.target.parentElement)) continue;
+        if(m.type==='childList'){
+          const nodes = [...m.addedNodes, ...m.removedNodes];
+          if(nodes.length && nodes.every(isInspectorNode)) continue;
+        }
+        real = true; break;
+      }
+      if(real) scheduleSave();
+    });
+    obs.observe(iframeDoc.documentElement, {attributes:true, childList:true, characterData:true, subtree:true});
+  }
+
+  function scheduleSave(){
+    dirty = true;
+    setStatus('pending', 'Unsaved changes…');
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(doSave, 700);
+  }
+
+  function serialize(){
+    const clone = iframeDoc.documentElement.cloneNode(true);
+    clone.querySelectorAll('#__inspector_hover__, #__inspector_select__, #__inspector_label__, #__inspector_style__').forEach(n => n.remove());
+    clone.querySelectorAll('[contenteditable]').forEach(n => n.removeAttribute('contenteditable'));
+    return originalDoctype + '\n' + clone.outerHTML;
+  }
+
+  async function doSave(){
+    if(!dirty) return;
+    const html = serialize();
+    if(fileHandle){
+      setStatus('saving', 'Saving…');
+      try{
+        const writable = await fileHandle.createWritable();
+        await writable.write(html);
+        await writable.close();
+        dirty = false;
+        setStatus('saved', 'Saved ' + new Date().toLocaleTimeString());
+      }catch(e){
+        setStatus('error', 'Save failed: ' + e.message);
+      }
+    } else {
+      dirty = false;
+      setStatus('idle', 'Loaded — click "Download edited file" to export');
+    }
+  }
+
+  saveBtn.addEventListener('click', () => { clearTimeout(saveTimer); doSave(); });
+  saveBtn.textContent = supportsFS ? 'Save now' : 'Download edited file';
+  if(!supportsFS){
+    saveBtn.addEventListener('click', () => {
+      const html = serialize();
+      const blob = new Blob([html], {type:'text/html'});
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = filenameEl.textContent || 'edited.html';
+      a.click();
+    });
+  }
+
+  document.addEventListener('keydown', (e) => {
+    if((e.metaKey || e.ctrlKey) && e.key.toLowerCase()==='s'){
+      e.preventDefault();
+      clearTimeout(saveTimer);
+      doSave();
+    }
+  });
+})();
+</script>
+</body>
+</html>
